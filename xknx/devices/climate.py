@@ -4,20 +4,39 @@ Module for managing the climate within a room.
 * It reads/listens to a temperature address from KNX bus.
 * Manages and sends the desired setpoint to KNX bus.
 """
-from xknx.remote_value import (
-    RemoteValue1Count, RemoteValueSwitch, RemoteValueTemp)
+from enum import Enum
+
+from xknx.dpt import DPTArray, DPTTemperature, DPTValue1Count
+from xknx.remote_value import RemoteValue, RemoteValueSwitch, RemoteValueTemp
 from xknx.telegram import GroupAddress
 
 from .climate_mode import ClimateMode
 from .device import Device
 
+
+class SetpointShiftMode(Enum):
+    DPT6010 = 1
+    DPT9002 = 2
+
+
 DEFAULT_SETPOINT_SHIFT_MAX = 6
 DEFAULT_SETPOINT_SHIFT_MIN = -6
 DEFAULT_SETPOINT_SHIFT_STEP = 0.5
-DEFAULT_TEMPERATUE_STEP = 0.1
+DEFAULT_TEMPERATURE_STEP = 0.1
+DEFAULT_SETPOINT_SHIFT_MODE = SetpointShiftMode.DPT6010
 
 
-class SetpointShiftValue(RemoteValue1Count):
+def validate_temperature(xknx, device_name, value, min_temp, max_temp):
+    if value > max_temp:
+        xknx.logger.warning("setpoint_shift_max exceeded at %s: %s", device_name, value)
+        return max_temp
+    if value < min_temp:
+        xknx.logger.warning("setpoint_shift_min exceeded at %s: %s", device_name, value)
+        return min_temp
+    return value
+
+
+class SetpointShiftValue(RemoteValue):
     """Class for managing setpoint_shift values."""
 
     def __init__(self,
@@ -26,6 +45,7 @@ class SetpointShiftValue(RemoteValue1Count):
                  group_address_state=None,
                  device_name=None,
                  after_update_cb=None,
+                 setpoint_shift_mode=DEFAULT_SETPOINT_SHIFT_MODE,
                  setpoint_shift_step=DEFAULT_SETPOINT_SHIFT_STEP,
                  min_temp_delta=DEFAULT_SETPOINT_SHIFT_MIN,
                  max_temp_delta=DEFAULT_SETPOINT_SHIFT_MAX):
@@ -37,29 +57,48 @@ class SetpointShiftValue(RemoteValue1Count):
                          device_name=device_name,
                          after_update_cb=after_update_cb)
 
+        print(setpoint_shift_mode)
+        self.setpoint_shift_mode = setpoint_shift_mode
         self.setpoint_shift_step = setpoint_shift_step
         self.min_temp_delta = min_temp_delta
         self.max_temp_delta = max_temp_delta
+
+    def payload_valid(self, payload):
+        """Test if telegram payload may be parsed."""
+        if self.setpoint_shift_mode == SetpointShiftMode.DPT6010:
+            return (isinstance(payload, DPTArray) and len(payload.value) == 1)
+        return (isinstance(payload, DPTArray) and len(payload.value) == 2)
+
+    def to_knx(self, value):
+        """Convert value to payload."""
+        if self.setpoint_shift_mode == SetpointShiftMode.DPT6010:
+            return DPTArray(DPTValue1Count.to_knx(value))
+        return DPTArray(DPTTemperature.to_knx(value))
+
+    def from_knx(self, payload):
+        """Convert current payload to value."""
+        if self.setpoint_shift_mode == SetpointShiftMode.DPT6010:
+            return DPTValue1Count.from_knx(payload.value)
+        return DPTTemperature.from_knx(payload.value)
 
     @property
     def value(self):
         """Return current value in Kelvin."""
         if super().value is None:
             return None
-        return super().value * self.setpoint_shift_step
+        if self.setpoint_shift_mode == SetpointShiftMode.DPT6010:
+            return super().value * self.setpoint_shift_step
+        return super().value
 
     async def set(self, value):
         """Set new value from Kelvin."""
-        if value > self.max_temp_delta:
-            self.xknx.logger.warning("setpoint_shift_max exceeded at %s: %s",
-                                     self.device_name, value)
-            value = self.max_temp_delta
-        if value < self.min_temp_delta:
-            self.xknx.logger.warning("setpoint_shift_min exceeded at %s: %s",
-                                     self.device_name, value)
-            value = self.min_temp_delta
-        steps = int(value / self.setpoint_shift_step)
-        await super().set(steps)
+        value = validate_temperature(self.xknx, self.device_name, value,
+                                     self.min_temp_delta, self.max_temp_delta)
+        if self.setpoint_shift_mode == SetpointShiftMode.DPT6010:
+            steps = int(value / self.setpoint_shift_step)
+            await super().set(steps)
+        else:
+            await super().set(value)
 
 
 class Climate(Device):
@@ -74,6 +113,7 @@ class Climate(Device):
                  group_address_target_temperature_state=None,
                  group_address_setpoint_shift=None,
                  group_address_setpoint_shift_state=None,
+                 setpoint_shift_mode=DEFAULT_SETPOINT_SHIFT_MODE,
                  setpoint_shift_step=DEFAULT_SETPOINT_SHIFT_STEP,
                  setpoint_shift_max=DEFAULT_SETPOINT_SHIFT_MAX,
                  setpoint_shift_min=DEFAULT_SETPOINT_SHIFT_MIN,
@@ -117,6 +157,7 @@ class Climate(Device):
             group_address_setpoint_shift_state,
             device_name=self.name,
             after_update_cb=self.after_update,
+            setpoint_shift_mode=setpoint_shift_mode,
             setpoint_shift_step=setpoint_shift_step,
             min_temp_delta=setpoint_shift_min,
             max_temp_delta=setpoint_shift_max)
@@ -149,6 +190,8 @@ class Climate(Device):
             config.get('group_address_setpoint_shift')
         group_address_setpoint_shift_state = \
             config.get('group_address_setpoint_shift_state')
+        setpoint_shift_mode = \
+            config.get('setpoint_shift_mode', DEFAULT_SETPOINT_SHIFT_MODE)
         setpoint_shift_step = \
             config.get('setpoint_shift_step', DEFAULT_SETPOINT_SHIFT_STEP)
         setpoint_shift_max = \
@@ -178,6 +221,7 @@ class Climate(Device):
                    group_address_target_temperature_state=group_address_target_temperature_state,
                    group_address_setpoint_shift=group_address_setpoint_shift,
                    group_address_setpoint_shift_state=group_address_setpoint_shift_state,
+                   setpoint_shift_mode=setpoint_shift_mode,
                    setpoint_shift_step=setpoint_shift_step,
                    setpoint_shift_max=setpoint_shift_max,
                    setpoint_shift_min=setpoint_shift_min,
@@ -229,7 +273,7 @@ class Climate(Device):
         """Return smallest possible temperature step."""
         if self._setpoint_shift.initialized:
             return self._setpoint_shift.setpoint_shift_step
-        return DEFAULT_TEMPERATUE_STEP
+        return DEFAULT_TEMPERATURE_STEP
 
     async def set_target_temperature(self, target_temperature):
         """Send new target temperature or setpoint_shift to KNX bus."""
