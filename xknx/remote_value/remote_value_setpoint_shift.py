@@ -21,14 +21,12 @@ class RemoteValueSetpointShift(RemoteValue1Count):
 
         self.setpoint_shift_step = setpoint_shift_step
 
-    @property
-    def value(self):
-        """Return current value in Kelvin."""
-        if super().value is None:
-            return None
-        return super().value * self.setpoint_shift_step
+    def to_knx(self, value):
+        """Convert value to payload."""
+        converted_value = int(value / self.setpoint_shift_step)
+        return super().to_knx(converted_value)
 
-    async def set(self, value):
-        """Set new value from Kelvin."""
-        steps = int(value / self.setpoint_shift_step)
-        await super().set(steps)
+    def from_knx(self, payload):
+        """Convert current payload to value."""
+        converted_payload = super().from_knx(payload)
+        return converted_payload * self.setpoint_shift_step
