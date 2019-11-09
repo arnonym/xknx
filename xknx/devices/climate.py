@@ -213,7 +213,10 @@ class Climate(Device):
             temperature_delta = target_temperature-self.base_temperature
             await self.set_setpoint_shift(temperature_delta)
         else:
-            await self.target_temperature.set(target_temperature)
+            validated_temp = self.validate_value(target_temperature,
+                                                 self.min_temp,
+                                                 self.max_temp)
+            await self.target_temperature.set(validated_temp)
 
     @property
     def base_temperature(self):
@@ -233,21 +236,19 @@ class Climate(Device):
         """Return current offset from base temperature in Kelvin."""
         return self._setpoint_shift.value
 
-    def validate_temperature(self, value):
+    def validate_value(self, value, min_value, max_value):
         """Check boundaries of temperature and return valid temperature value"""
-        if value > self.setpoint_shift_max:
-            self.xknx.logger.warning("setpoint_shift_max exceeded at %s: %s",
-                                     self._setpoint_shift.device_name, value)
-            return self.setpoint_shift_max
-        if value < self.setpoint_shift_min:
-            self.xknx.logger.warning("setpoint_shift_min exceeded at %s: %s",
-                                     self._setpoint_shift.device_name, value)
-            return self.setpoint_shift_min
+        if value < min_value:
+            self.xknx.logger.warning("min value exceeded at %s: %s", self.name, value)
+            return min_value
+        if value > max_value:
+            self.xknx.logger.warning("max value exceeded at %s: %s", self.name, value)
+            return max_value
         return value
 
     async def set_setpoint_shift(self, offset):
         """Send new temperature offset to KNX bus."""
-        validated_offset = self.validate_temperature(offset)
+        validated_offset = self.validate_value(offset, self.setpoint_shift_min, self.setpoint_shift_max)
         base_temperature = self.base_temperature
         await self._setpoint_shift.set(validated_offset)
         # broadcast new target temperature and set internally
