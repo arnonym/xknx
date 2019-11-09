@@ -25,16 +25,6 @@ DEFAULT_TEMPERATURE_STEP = 0.1
 DEFAULT_SETPOINT_SHIFT_MODE = SetpointShiftMode.DPT6010
 
 
-def validate_temperature(xknx, device_name, value, min_temp, max_temp):
-    if value > max_temp:
-        xknx.logger.warning("setpoint_shift_max exceeded at %s: %s", device_name, value)
-        return max_temp
-    if value < min_temp:
-        xknx.logger.warning("setpoint_shift_min exceeded at %s: %s", device_name, value)
-        return min_temp
-    return value
-
-
 class Climate(Device):
     """Class for managing the climate."""
 
@@ -243,12 +233,22 @@ class Climate(Device):
         """Return current offset from base temperature in Kelvin."""
         return self._setpoint_shift.value
 
+    def validate_temperature(self, device_name, value, min_temp, max_temp):
+        """Check boundaries of temperature and return valid temperature value"""
+        if value > max_temp:
+            self.xknx.logger.warning("setpoint_shift_max exceeded at %s: %s", device_name, value)
+            return max_temp
+        if value < min_temp:
+            self.xknx.logger.warning("setpoint_shift_min exceeded at %s: %s", device_name, value)
+            return min_temp
+        return value
+
     async def set_setpoint_shift(self, offset):
         """Send new temperature offset to KNX bus."""
-        offset = validate_temperature(self.xknx, self._setpoint_shift.device_name, offset,
+        validated_offset = self.validate_temperature(self._setpoint_shift.device_name, offset,
                                      self.setpoint_shift_min, self.setpoint_shift_max)
         base_temperature = self.base_temperature
-        await self._setpoint_shift.set(offset)
+        await self._setpoint_shift.set(validated_offset)
         # broadcast new target temperature and set internally
         if self.target_temperature.writable and \
                 base_temperature is not None:
