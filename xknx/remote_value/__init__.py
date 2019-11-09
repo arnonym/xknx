@@ -13,3 +13,4 @@ from .remote_value_step import RemoteValueStep
 from .remote_value_switch import RemoteValueSwitch
 from .remote_value_temp import RemoteValueTemp
 from .remote_value_updown import RemoteValueUpDown
+from .remote_value_setpoint_shift import RemoteValueSetpointShift
