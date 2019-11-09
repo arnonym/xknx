@@ -233,20 +233,21 @@ class Climate(Device):
         """Return current offset from base temperature in Kelvin."""
         return self._setpoint_shift.value
 
-    def validate_temperature(self, device_name, value, min_temp, max_temp):
+    def validate_temperature(self, value):
         """Check boundaries of temperature and return valid temperature value"""
-        if value > max_temp:
-            self.xknx.logger.warning("setpoint_shift_max exceeded at %s: %s", device_name, value)
-            return max_temp
-        if value < min_temp:
-            self.xknx.logger.warning("setpoint_shift_min exceeded at %s: %s", device_name, value)
-            return min_temp
+        if value > self.setpoint_shift_max:
+            self.xknx.logger.warning("setpoint_shift_max exceeded at %s: %s",
+                                     self._setpoint_shift.device_name, value)
+            return self.setpoint_shift_max
+        if value < self.setpoint_shift_min:
+            self.xknx.logger.warning("setpoint_shift_min exceeded at %s: %s",
+                                     self._setpoint_shift.device_name, value)
+            return self.setpoint_shift_min
         return value
 
     async def set_setpoint_shift(self, offset):
         """Send new temperature offset to KNX bus."""
-        validated_offset = self.validate_temperature(self._setpoint_shift.device_name, offset,
-                                     self.setpoint_shift_min, self.setpoint_shift_max)
+        validated_offset = self.validate_temperature(offset)
         base_temperature = self.base_temperature
         await self._setpoint_shift.set(validated_offset)
         # broadcast new target temperature and set internally
